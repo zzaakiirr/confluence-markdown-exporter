@@ -125,23 +125,20 @@ class Converter:
                 raise NotImplemented()
 
     def __convert_atlassian_html(self, soup):
-        for image in soup.find_all("ac:image"):
-            url = None
-            for child in image.children:
-                url = child.get("ri:filename", None)
-                break
+        for attachment in soup.find_all(["ac:image", "ri:attachment"]):
+            url = attachment.get("ri:filename") or next(child.get("ri:filename", None) for child in attachment.children)
 
             if url is None:
-                # no url found for ac:image
+                # no url found for ac:image, ri:attachment
                 continue
 
             # construct new, actually valid HTML tag
             srcurl = os.path.join(ATTACHMENT_FOLDER_NAME, url)
             imgtag = soup.new_tag("img", attrs={"src": srcurl, "alt": srcurl})
 
-            # insert a linebreak after the original "ac:image" tag, then replace with an actual img tag
-            image.insert_after(soup.new_tag("br"))
-            image.replace_with(imgtag)
+            # insert a linebreak after the original "ac:image", "ri:attachment" tag, then replace with an actual img tag
+            attachment.insert_after(soup.new_tag("br"))
+            attachment.replace_with(imgtag)
         return soup
 
     def convert(self):
