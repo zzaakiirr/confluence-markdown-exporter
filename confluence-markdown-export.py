@@ -7,6 +7,18 @@ from markdownify import MarkdownConverter
 from atlassian import Confluence
 
 
+# https://github.com/matthewwithanm/python-markdownify/issues/61
+class AlwaysRenderImagesConverter(MarkdownConverter):
+    def convert_img(self, el, text: str, convert_as_inline: bool) -> str:
+        """Allows images to be rendered in headings and table cells"""
+        alt = el.attrs.get("alt", None) or ""
+        src = el.attrs.get("src", None) or ""
+        title = el.attrs.get("title", None) or ""
+        title_part = ' "%s"' % title.replace('"', r"\"") if title else ""
+
+        return "![%s](%s%s)" % (alt, src, title_part)
+
+
 ATTACHMENT_FOLDER_NAME = "attachments"
 
 
@@ -51,7 +63,7 @@ class Exporter:
         # save all files as .html for now, we will convert them later
         extension = ".html"
         if len(child_ids) > 0:
-            document_name = "index" + extension
+            document_name = page_title + extension
         else:
             document_name = page_title + extension
 
@@ -75,7 +87,7 @@ class Exporter:
                 att_title = i["title"]
                 download = i["_links"]["download"]
 
-                att_url = self.__url + "wiki/" + download
+                att_url = self.__url + download # @pv: delete `wiki/` path, otherwise getting 404
                 att_sanitized_name = self.__sanitize_filename(att_title)
                 att_filename = os.path.join(page_output_dir, ATTACHMENT_FOLDER_NAME, att_sanitized_name)
 
@@ -87,8 +99,7 @@ class Exporter:
                 r = requests.get(att_url, auth=(self.__username, self.__token), stream=True)
                 r.raise_for_status()
                 with open(att_filename, "wb") as f:
-                    for buf in r.iter_content():
-                        f.write(buf)
+                    f.write(r.content) # @pv: using `r.content` instead of using `r.iter_content()`
 
         self.__seen.add(page_id)
     
@@ -125,6 +136,24 @@ class Converter:
                 raise NotImplemented()
 
     def __convert_atlassian_html(self, soup):
+        soup = self.__convert_attachments(soup)
+        soup = self.__convert_jira_links(soup)
+
+        return soup
+
+    def __convert_jira_links(self, soup):
+        for jira_macro in soup.find_all('ac:structured-macro', {'ac:name': 'jira'}):
+            issue_key = jira_macro.find('ac:parameter', {'ac:name': 'key'})
+
+            if issue_key is None:
+                continue
+
+            img_tag = soup.new_tag('img', attrs={'src': issue_key.text, 'alt': 'jira_link'})
+            jira_macro.replace_with(img_tag)
+
+        return soup
+
+    def __convert_attachments(self, soup):
         for attachment in soup.find_all(["ac:image", "ri:attachment"]):
             url = attachment.get("ri:filename") or next(child.get("ri:filename", None) for child in attachment.children)
 
@@ -148,10 +177,6 @@ class Converter:
             if not path.endswith(".html"):
                 continue
 
-            if not path.endswith("test.html"):
-                print("SKIPPING", path)
-                continue
-
             print("Converting {}".format(path))
             with open(path) as f:
                 data = f.read()
@@ -159,7 +184,7 @@ class Converter:
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
             soup = self.__convert_atlassian_html(soup_raw)
 
-            md = MarkdownConverter().convert_soup(soup)
+            md = AlwaysRenderImagesConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)
