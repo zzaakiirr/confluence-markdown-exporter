@@ -20,6 +20,7 @@ class AlwaysRenderImagesConverter(MarkdownConverter):
 
 
 ATTACHMENT_FOLDER_NAME = "attachments"
+NON_CONVETIBLE_TAGS = ['colour', 'height', 'weight']
 
 
 class ExportException(Exception):
@@ -138,6 +139,7 @@ class Converter:
     def __convert_atlassian_html(self, soup):
         soup = self.__convert_attachments(soup)
         soup = self.__convert_jira_links(soup)
+        soup = self.__extract_nonconvertible_tags(soup)
 
         return soup
 
@@ -150,6 +152,13 @@ class Converter:
 
             img_tag = soup.new_tag('img', attrs={'src': issue_key.text, 'alt': 'jira_link'})
             jira_macro.replace_with(img_tag)
+
+        return soup
+
+    def __extract_nonconvertible_tags(self, soup):
+        for name in NON_CONVETIBLE_TAGS:
+            for param in soup.find_all('ac:parameter', {'ac:name': name}):
+                param.extract()
 
         return soup
 
