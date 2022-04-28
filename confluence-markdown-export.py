@@ -39,14 +39,14 @@ class Exporter:
             # this could theoretically happen if Page IDs are not unique or there is a circle
             raise ExportException("Duplicate Page ID Found!")
 
-        page = self.__confluence.get_page_by_id(src_id, expand="body.storage")
+        page = self.__confluence.get_page_by_id(src_id, expand="body.export_view")
         page_title = page["title"]
         page_id = page["id"]
     
         # see if there are any children
         child_ids = self.__confluence.get_child_id_list(page_id)
     
-        content = page["body"]["storage"]["value"]
+        content = page["body"]["export_view"]["value"]
 
         # save all files as .html for now, we will convert them later
         extension = ".html"
