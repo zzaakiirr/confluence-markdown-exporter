@@ -51,7 +51,7 @@ class Exporter:
         # save all files as .html for now, we will convert them later
         extension = ".html"
         if len(child_ids) > 0:
-            document_name = "index" + extension
+            document_name = page_title + extension
         else:
             document_name = page_title + extension
 
@@ -124,24 +124,47 @@ class Converter:
             else:
                 raise NotImplemented()
 
-    def __convert_atlassian_html(self, soup):
-        for image in soup.find_all("ac:image"):
-            url = None
-            for child in image.children:
-                url = child.get("ri:filename", None)
-                break
+    def __convert_html(self, soup):
+        soup = self.__extract_style_tags(soup)
+        soup = self.__convert_attachments(soup)
+        soup = self.__convert_jira_links(soup)
+        soup = self.__convert_drawio_diagrams(soup)
 
-            if url is None:
-                # no url found for ac:image
-                continue
+        return soup
 
-            # construct new, actually valid HTML tag
-            srcurl = os.path.join(ATTACHMENT_FOLDER_NAME, url)
-            imgtag = soup.new_tag("img", attrs={"src": srcurl, "alt": srcurl})
+    def __extract_style_tags(self, soup):
+        for style_tag in soup.find_all('style'):
+            style_tag.extract()
 
-            # insert a linebreak after the original "ac:image" tag, then replace with an actual img tag
-            image.insert_after(soup.new_tag("br"))
-            image.replace_with(imgtag)
+        return soup
+
+    def __convert_drawio_diagrams(self, soup):
+        drawio_imgs = [img for img in soup.find_all('img') if 'data:image/png;base64' in img.get('src', '')]
+
+        for drawio_img in drawio_imgs:
+            drawio_img['alt'] = 'diagram'
+
+        return soup
+
+    def __convert_attachments(self, soup):
+        attachment_links = [
+            anchor for anchor in soup.find_all('a') if 'download/attachments/' in anchor.get('href', '')
+        ]
+
+        for attachment_link in attachment_links:
+            attachment_link['href'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_link.text)
+
+        return soup
+
+    def __convert_jira_links(self, soup):
+        jira_links = [
+            a for a in soup.find_all('a') if 'jira/browse' in a.get('href', '')
+        ]
+
+        for jira_link in jira_links:
+            jira_link['href'] = os.path.join(ATTACHMENT_FOLDER_NAME, jira_link.text)
+            jira_link['class'] = ''
+
         return soup
 
     def convert(self):
@@ -151,16 +174,12 @@ class Converter:
             if not path.endswith(".html"):
                 continue
 
-            if not path.endswith("test.html"):
-                print("SKIPPING", path)
-                continue
-
             print("Converting {}".format(path))
             with open(path) as f:
                 data = f.read()
 
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
-            soup = self.__convert_atlassian_html(soup_raw)
+            soup = self.__convert_html(soup_raw)
 
             md = MarkdownConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
