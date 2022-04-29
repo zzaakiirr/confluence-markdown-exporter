@@ -9,6 +9,17 @@ from atlassian import Confluence
 
 ATTACHMENT_FOLDER_NAME = "attachments"
 
+# https://github.com/matthewwithanm/python-markdownify/issues/61
+class AlwaysRenderImagesConverter(MarkdownConverter):
+    def convert_img(self, el, text: str, convert_as_inline: bool) -> str:
+        """Allows images to be rendered in headings and table cells"""
+        alt = el.attrs.get("alt", None) or ""
+        src = el.attrs.get("src", None) or ""
+        title = el.attrs.get("title", None) or ""
+        title_part = ' "%s"' % title.replace('"', r"\"") if title else ""
+
+        return "![%s](%s%s)" % (alt, src, title_part)
+
 
 class ExportException(Exception):
     pass
@@ -127,7 +138,7 @@ class Converter:
     def __convert_html(self, soup):
         soup = self.__extract_style_tags(soup)
         soup = self.__convert_attachments(soup)
-        soup = self.__convert_jira_links(soup)
+        soup = self.__convert_jira_issues(soup)
         soup = self.__convert_drawio_diagrams(soup)
 
         return soup
@@ -156,14 +167,12 @@ class Converter:
 
         return soup
 
-    def __convert_jira_links(self, soup):
-        jira_links = [
-            a for a in soup.find_all('a') if 'jira/browse' in a.get('href', '')
-        ]
+    def __convert_jira_issues(self, soup):
+        jira_issue_spans = [span for span in soup.select('span.jira-issue')]
 
-        for jira_link in jira_links:
-            jira_link['href'] = os.path.join(ATTACHMENT_FOLDER_NAME, jira_link.text)
-            jira_link['class'] = ''
+        for span in jira_issue_spans:
+            img = soup.new_tag('img', attrs={'src': span['data-jira-key'], 'alt': 'jira_issue'})
+            span.replace_with(img)
 
         return soup
 
@@ -181,7 +190,7 @@ class Converter:
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
             soup = self.__convert_html(soup_raw)
 
-            md = MarkdownConverter().convert_soup(soup)
+            md = AlwaysRenderImagesConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)
