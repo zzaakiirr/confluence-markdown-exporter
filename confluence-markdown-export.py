@@ -1,10 +1,14 @@
 import os
 import argparse
 
+from urllib.parse import urlparse
+from urllib.parse import parse_qs
+
 import requests
 import bs4
 from markdownify import MarkdownConverter
 from atlassian import Confluence
+from atlassian.errors import ApiError
 
 
 ATTACHMENT_FOLDER_NAME = "attachments"
@@ -124,8 +128,10 @@ class Exporter:
 
 
 class Converter:
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, gitlab_url, url, username, token):
         self.__out_dir = out_dir
+        self.__gitlab_url = gitlab_url
+        self.__confluence = Confluence(url=url, username=username, password=token)
 
     def recurse_findfiles(self, path):
         for entry in os.scandir(path):
@@ -141,6 +147,7 @@ class Converter:
         soup = self.__convert_attachments(soup)
         soup = self.__convert_jira_issues(soup)
         soup = self.__convert_drawio_diagrams(soup)
+        soup = self.__convert_page_links(soup)
 
         return soup
 
@@ -186,6 +193,31 @@ class Converter:
 
         return soup
 
+    def __convert_page_links(self, soup):
+        page_links = [anchor for anchor in soup.find_all('a') if 'pages/viewpage.action?' in anchor.get('href', '')]
+
+        for page_link in page_links:
+            url = urlparse(page_link['href'])
+            page_id = parse_qs(url.query).get('pageId', [])[0]
+
+            if page_id is None:
+                continue
+
+            path = self.__gitlab_url
+            try:
+                page = self.__confluence.get_page_by_id(page_id, expand="ancestors")
+            except ApiError:
+                page_link['href'] = ''
+                continue
+
+            for parent in page['ancestors']:
+                path += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
+
+            page_link['href'] = path
+            del page_link['title']
+
+        return soup
+
     def convert(self):
         for entry in self.recurse_findfiles(self.__out_dir):
             path = entry.path
@@ -208,6 +240,7 @@ class Converter:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("gitlab_url", type=str, help="The url to the Gitlab instance")
     parser.add_argument("url", type=str, help="The url to the confluence instance")
     parser.add_argument("username", type=str, help="The username")
     parser.add_argument("token", type=str, help="The access token to Confluence")
@@ -223,5 +256,6 @@ if __name__ == "__main__":
                           no_attach=args.no_attach)
         dumper.dump()
     
-    converter = Converter(out_dir=args.out_dir)
+    converter = Converter(out_dir=args.out_dir, gitlab_url=args.gitlab_url, url=args.url, username=args.username,
+                          token=args.token)
     converter.convert()
