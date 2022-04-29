@@ -292,6 +292,9 @@ class MarkdownConverter(object):
         return '![%s](%s%s)' % (alt, src, title_part)
 
     def convert_list(self, el, text, convert_as_inline):
+        # Do not convert list if it is inside table cell
+        if el.parent.name == 'td':
+            return str(el)
 
         # Converting a list to inline is undefined.
         # Ignoring convert_to_inline for list.
