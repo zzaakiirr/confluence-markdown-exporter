@@ -165,6 +165,15 @@ class Converter:
         for attachment_link in attachment_links:
             attachment_link['href'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_link.text)
 
+        attachment_imgs = [
+            img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
+        ]
+
+        for img in attachment_imgs:
+            attachment_name = img['src'].rpartition('/')[-1].rpartition('?')[0]
+            img['alt'] = attachment_name
+            img['src'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+
         return soup
 
     def __convert_jira_issues(self, soup):
