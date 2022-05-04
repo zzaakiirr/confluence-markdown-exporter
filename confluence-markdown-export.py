@@ -203,17 +203,17 @@ class Converter:
             if page_id is None:
                 continue
 
-            path = self.__gitlab_url
             try:
                 page = self.__confluence.get_page_by_id(page_id, expand="ancestors")
             except ApiError:
                 page_link['href'] = ''
                 continue
 
+            parent_slug = ''
             for parent in page['ancestors']:
-                path += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
+                parent_slug += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
 
-            page_link['href'] = path
+            page_link['href'] = f"{self.__gitlab_url}{parent_slug}/{page['title']}"
             del page_link['title']
 
         return soup
