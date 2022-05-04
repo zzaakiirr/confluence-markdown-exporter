@@ -257,7 +257,7 @@ class Converter:
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
             soup = self.__convert_html(soup_raw)
 
-            md = AlwaysRenderImagesConverter().convert_soup(soup)
+            md = AlwaysRenderImagesConverter(skip=['table']).convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)

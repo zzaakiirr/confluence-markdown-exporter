@@ -78,6 +78,7 @@ class MarkdownConverter(object):
         sup_symbol = ''
         wrap = False
         wrap_width = 80
+        skip = []
 
     class Options(DefaultOptions):
         pass
@@ -144,6 +145,10 @@ class MarkdownConverter(object):
 
         if not children_only:
             convert_fn = getattr(self, 'convert_%s' % node.name, None)
+
+            if node.name in self.options['skip']:
+                return str(node)
+
             if convert_fn and self.should_convert_tag(node.name):
                 text = convert_fn(node, text, convert_as_inline)
 
