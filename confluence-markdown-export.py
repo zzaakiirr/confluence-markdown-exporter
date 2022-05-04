@@ -1,8 +1,7 @@
 import os
 import argparse
 
-from urllib.parse import urlparse
-from urllib.parse import parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
 import bs4
@@ -171,14 +170,17 @@ class Converter:
         ]
 
         for attachment_link in attachment_links:
-            attachment_link['href'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_link.text)
+            attachment_link['href'] = os.path.join(
+                ATTACHMENT_FOLDER_NAME,
+                attachment_link.get('data-linked-resource-default-alias') or attachment_link.get('data-filename')
+            )
 
         attachment_imgs = [
             img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
         ]
 
         for img in attachment_imgs:
-            attachment_name = img['src'].rpartition('/')[-1].rpartition('?')[0]
+            attachment_name = unquote(urlparse(img['src']).path.rpartition('/')[-1])
             img['alt'] = attachment_name
             img['src'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
 
