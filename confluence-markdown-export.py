@@ -131,18 +131,11 @@ class Converter:
                 raise NotImplemented()
 
     def __convert_html(self, soup):
-        soup = self.__extract_style_tags(soup)
         soup = self.__extract_nonconvertible_tags(soup)
         soup = self.__convert_attachments(soup)
         soup = self.__convert_jira_issues(soup)
         soup = self.__convert_drawio_diagrams(soup)
         soup = self.__convert_page_links(soup)
-
-        return soup
-
-    def __extract_style_tags(self, soup):
-        for style_tag in soup.find_all('style'):
-            style_tag.extract()
 
         return soup
 
