@@ -127,9 +127,9 @@ class Exporter:
 
 
 class Converter:
-    def __init__(self, out_dir, gitlab_url, url, username, token):
+    def __init__(self, out_dir, gitlab_wikis_path, url, username, token):
         self.__out_dir = out_dir
-        self.__gitlab_url = gitlab_url
+        self.gitlab_wikis_path = gitlab_wikis_path
         self.__confluence = Confluence(url=url, username=username, password=token)
 
     def recurse_findfiles(self, path):
@@ -143,6 +143,7 @@ class Converter:
 
     def __convert_html(self, soup):
         soup = self.__extract_style_tags(soup)
+        soup = self.__extract_nonconvertible_tags(soup)
         soup = self.__convert_attachments(soup)
         soup = self.__convert_jira_issues(soup)
         soup = self.__convert_drawio_diagrams(soup)
@@ -153,6 +154,12 @@ class Converter:
     def __extract_style_tags(self, soup):
         for style_tag in soup.find_all('style'):
             style_tag.extract()
+
+        return soup
+
+    def __extract_nonconvertible_tags(self, soup):
+        for tag in soup.select('div.attachment-buttons, a.download-all-link, div.plugin_attachments_upload_container'):
+            tag.extract()
 
         return soup
 
@@ -170,10 +177,26 @@ class Converter:
         ]
 
         for attachment_link in attachment_links:
-            attachment_link['href'] = os.path.join(
-                ATTACHMENT_FOLDER_NAME,
-                attachment_link.get('data-linked-resource-default-alias') or attachment_link.get('data-filename')
-            )
+            attachment_name = attachment_link.get('data-linked-resource-default-alias') or \
+                              attachment_link.get('data-filename')
+
+            src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+            img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
+
+            attachment_link.replace_with(img)
+
+        attachment_preview_links = [
+            anchor for anchor in soup.find_all('a') if 'preview=' in anchor.get('href', '')
+        ]
+
+        for attachment_preview_link in attachment_preview_links:
+            query = unquote(urlparse(attachment_preview_link['href']).query)
+            attachment_name = query.rpartition('/')[-1].replace('+', ' ')
+
+            src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+            img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
+
+            attachment_preview_link.replace_with(img)
 
         attachment_imgs = [
             img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
@@ -215,7 +238,7 @@ class Converter:
             for parent in page['ancestors']:
                 parent_slug += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
 
-            page_link['href'] = f"{self.__gitlab_url}{parent_slug}/{page['title']}"
+            page_link['href'] = f"{self.gitlab_wikis_path}{parent_slug}/{page['title'].replace(' ', '-')}"
             del page_link['title']
 
         return soup
@@ -242,7 +265,7 @@ class Converter:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("gitlab_url", type=str, help="The url to the Gitlab instance")
+    parser.add_argument("gitlab_wikis_path", type=str, help="The path to the Gitlab wikis")
     parser.add_argument("url", type=str, help="The url to the confluence instance")
     parser.add_argument("username", type=str, help="The username")
     parser.add_argument("token", type=str, help="The access token to Confluence")
@@ -258,6 +281,6 @@ if __name__ == "__main__":
                           no_attach=args.no_attach)
         dumper.dump()
     
-    converter = Converter(out_dir=args.out_dir, gitlab_url=args.gitlab_url, url=args.url, username=args.username,
-                          token=args.token)
+    converter = Converter(out_dir=args.out_dir, gitlab_wikis_path=args.gitlab_wikis_path, url=args.url,
+                          username=args.username, token=args.token)
     converter.convert()
