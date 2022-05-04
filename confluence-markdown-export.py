@@ -12,17 +12,6 @@ from atlassian.errors import ApiError
 
 ATTACHMENT_FOLDER_NAME = "attachments"
 
-# https://github.com/matthewwithanm/python-markdownify/issues/61
-class AlwaysRenderImagesConverter(MarkdownConverter):
-    def convert_img(self, el, text: str, convert_as_inline: bool) -> str:
-        """Allows images to be rendered in headings and table cells"""
-        alt = el.attrs.get("alt", None) or ""
-        src = el.attrs.get("src", None) or ""
-        title = el.attrs.get("title", None) or ""
-        title_part = ' "%s"' % title.replace('"', r"\"") if title else ""
-
-        return "![%s](%s%s)" % (alt, src, title_part)
-
 
 class ExportException(Exception):
     pass
@@ -257,7 +246,7 @@ class Converter:
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
             soup = self.__convert_html(soup_raw)
 
-            md = AlwaysRenderImagesConverter(skip=['table']).convert_soup(soup)
+            md = MarkdownConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)

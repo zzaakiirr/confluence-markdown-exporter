@@ -78,7 +78,6 @@ class MarkdownConverter(object):
         sup_symbol = ''
         wrap = False
         wrap_width = 80
-        skip = []
 
     class Options(DefaultOptions):
         pass
@@ -101,6 +100,16 @@ class MarkdownConverter(object):
         return self.process_tag(soup, convert_as_inline=False, children_only=True)
 
     def process_tag(self, node, convert_as_inline, children_only=False):
+        # Convert only <img> tags for table
+        if node.name == 'table':
+            text = str(node)
+
+            for img in node.find_all('img'):
+                converted_img = self.convert_img(img, '', convert_as_inline)
+                text = text.replace(str(img), converted_img)
+
+            return text
+
         text = ''
 
         # markdown headings or cells can't include
@@ -145,9 +154,6 @@ class MarkdownConverter(object):
 
         if not children_only:
             convert_fn = getattr(self, 'convert_%s' % node.name, None)
-
-            if node.name in self.options['skip']:
-                return str(node)
 
             if convert_fn and self.should_convert_tag(node.name):
                 text = convert_fn(node, text, convert_as_inline)
