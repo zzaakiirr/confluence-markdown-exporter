@@ -17,6 +17,23 @@ class ExportException(Exception):
     pass
 
 
+class SkipTableMarkdownConverter(MarkdownConverter):
+    def process_tag(self, node, convert_as_inline, children_only=False):
+        if node.name != 'table':
+            return super(SkipTableMarkdownConverter, self).process_tag(node, convert_as_inline, children_only)
+
+        for el in node.find_all():
+            del el['class']
+
+        text = str(node.prettify())
+
+        for img in node.find_all('img'):
+            converted_img = self.convert_img(img, '', convert_as_inline)
+            text = text.replace(str(img), converted_img)
+
+        return text
+
+
 class Exporter:
     def __init__(self, url, username, token, out_dir, no_attach):
         self.__out_dir = out_dir
@@ -136,12 +153,23 @@ class Converter:
         soup = self.__convert_jira_issues(soup)
         soup = self.__convert_drawio_diagrams(soup)
         soup = self.__convert_page_links(soup)
+        soup = self.__convert_user_links(soup)
 
         return soup
 
     def __extract_nonconvertible_tags(self, soup):
         for tag in soup.select('div.attachment-buttons, a.download-all-link, div.plugin_attachments_upload_container'):
             tag.extract()
+
+        return soup
+
+    def __convert_user_links(self, soup):
+        user_links = [anchor for anchor in soup.find_all('a', {'class': 'confluence-userlink'})]
+
+        for user_link in user_links:
+            user_reference = soup.new_tag('span')
+            user_reference.string = f"@{user_link['data-username']}"
+            user_link.replace_with(user_reference)
 
         return soup
 
@@ -239,7 +267,7 @@ class Converter:
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
             soup = self.__convert_html(soup_raw)
 
-            md = MarkdownConverter().convert_soup(soup)
+            md = SkipTableMarkdownConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)
