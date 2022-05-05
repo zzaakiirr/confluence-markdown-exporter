@@ -12,6 +12,13 @@ from atlassian.errors import ApiError
 
 ATTACHMENT_FOLDER_NAME = "attachments"
 
+NONCONVERTIBLE_TAGS = [
+    'div.attachment-buttons',
+    'a.download-all-link',
+    'div.plugin_attachments_upload_container',
+    'style',
+]
+
 
 class ExportException(Exception):
     pass
@@ -158,7 +165,7 @@ class Converter:
         return soup
 
     def __extract_nonconvertible_tags(self, soup):
-        for tag in soup.select('div.attachment-buttons, a.download-all-link, div.plugin_attachments_upload_container'):
+        for tag in soup.select(','.join(NONCONVERTIBLE_TAGS)):
             tag.extract()
 
         return soup
