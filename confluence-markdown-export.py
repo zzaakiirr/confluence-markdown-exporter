@@ -54,7 +54,8 @@ class Exporter:
         self.__out_dir = out_dir
         self.__url = url
         self.__space_key = space_key
-        self.__confluence = Confluence(url=self.__url, cookies=parse_cookies())
+        self.__cookies = parse_cookies()
+        self.__confluence = Confluence(url=self.__url, cookies=self.__cookies)
         self.__seen = set()
         self.__no_attach = no_attach
 
@@ -128,7 +129,7 @@ class Exporter:
 
                 print("Saving attachment {} to {}".format(att_title, page_location))
 
-                r = requests.get(att_url, stream=True)
+                r = requests.get(att_url, stream=True, cookies=self.__cookies)
                 r.raise_for_status()
                 with open(att_filename, "wb") as f:
                     f.write(r.content)
