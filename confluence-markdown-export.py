@@ -131,8 +131,7 @@ class Exporter:
                 r = requests.get(att_url, stream=True)
                 r.raise_for_status()
                 with open(att_filename, "wb") as f:
-                    for buf in r.iter_content():
-                        f.write(buf)
+                    f.write(r.content)
 
         self.__seen.add(page_id)
     
