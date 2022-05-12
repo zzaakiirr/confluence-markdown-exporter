@@ -1,17 +1,44 @@
 import os
 import argparse
 
+from urllib.parse import urlparse, parse_qs, unquote
+
 import requests
 import bs4
 from markdownify import MarkdownConverter
 from atlassian import Confluence
+from atlassian.errors import ApiError
 
 
 ATTACHMENT_FOLDER_NAME = "attachments"
 
+NONCONVERTIBLE_TAGS = [
+    'div.attachment-buttons',
+    'a.download-all-link',
+    'div.plugin_attachments_upload_container',
+    'style',
+]
+
 
 class ExportException(Exception):
     pass
+
+
+class SkipTableMarkdownConverter(MarkdownConverter):
+    def process_tag(self, node, convert_as_inline, children_only=False):
+        if node.name != 'table':
+            return super(SkipTableMarkdownConverter, self).process_tag(node, convert_as_inline, children_only)
+
+        for el in node.find_all():
+            del el['class']
+
+        text = str(node.prettify())
+
+        for img in node.find_all('img'):
+            converted_img = self.convert_img(img, '', convert_as_inline)
+            text = text.replace(str(img), converted_img)
+
+        return text
 
 
 class Exporter:
@@ -39,19 +66,19 @@ class Exporter:
             # this could theoretically happen if Page IDs are not unique or there is a circle
             raise ExportException("Duplicate Page ID Found!")
 
-        page = self.__confluence.get_page_by_id(src_id, expand="body.storage")
+        page = self.__confluence.get_page_by_id(src_id, expand="body.export_view")
         page_title = page["title"]
         page_id = page["id"]
     
         # see if there are any children
         child_ids = self.__confluence.get_child_id_list(page_id)
     
-        content = page["body"]["storage"]["value"]
+        content = page["body"]["export_view"]["value"]
 
         # save all files as .html for now, we will convert them later
         extension = ".html"
         if len(child_ids) > 0:
-            document_name = "index" + extension
+            document_name = page_title + extension
         else:
             document_name = page_title + extension
 
@@ -75,7 +102,8 @@ class Exporter:
                 att_title = i["title"]
                 download = i["_links"]["download"]
 
-                att_url = self.__url + "wiki/" + download
+                # att_url = self.__url + "wiki/" + download
+                att_url = self.__url + download
                 att_sanitized_name = self.__sanitize_filename(att_title)
                 att_filename = os.path.join(page_output_dir, ATTACHMENT_FOLDER_NAME, att_sanitized_name)
 
@@ -112,8 +140,10 @@ class Exporter:
 
 
 class Converter:
-    def __init__(self, out_dir):
+    def __init__(self, out_dir, gitlab_wikis_path, url, username, token):
         self.__out_dir = out_dir
+        self.gitlab_wikis_path = gitlab_wikis_path
+        self.__confluence = Confluence(url=url, username=username, password=token)
 
     def recurse_findfiles(self, path):
         for entry in os.scandir(path):
@@ -124,24 +154,110 @@ class Converter:
             else:
                 raise NotImplemented()
 
-    def __convert_atlassian_html(self, soup):
-        for image in soup.find_all("ac:image"):
-            url = None
-            for child in image.children:
-                url = child.get("ri:filename", None)
-                break
+    def __convert_html(self, soup):
+        soup = self.__extract_nonconvertible_tags(soup)
+        soup = self.__convert_attachments(soup)
+        soup = self.__convert_jira_issues(soup)
+        soup = self.__convert_drawio_diagrams(soup)
+        soup = self.__convert_page_links(soup)
+        soup = self.__convert_user_links(soup)
 
-            if url is None:
-                # no url found for ac:image
+        return soup
+
+    def __extract_nonconvertible_tags(self, soup):
+        for tag in soup.select(','.join(NONCONVERTIBLE_TAGS)):
+            tag.extract()
+
+        return soup
+
+    def __convert_user_links(self, soup):
+        user_links = [anchor for anchor in soup.find_all('a', {'class': 'confluence-userlink'})]
+
+        for user_link in user_links:
+            user_reference = soup.new_tag('span')
+            user_reference.string = f"@{user_link['data-username']}"
+            user_link.replace_with(user_reference)
+
+        return soup
+
+    def __convert_drawio_diagrams(self, soup):
+        drawio_imgs = [img for img in soup.find_all('img') if 'data:image/png;base64' in img.get('src', '')]
+
+        for drawio_img in drawio_imgs:
+            drawio_img['alt'] = 'diagram'
+
+        return soup
+
+    def __convert_attachments(self, soup):
+        attachment_links = [
+            anchor for anchor in soup.find_all('a') if 'download/attachments/' in anchor.get('href', '')
+        ]
+
+        for attachment_link in attachment_links:
+            attachment_name = attachment_link.get('data-linked-resource-default-alias') or \
+                              attachment_link.get('data-filename')
+
+            src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+            img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
+
+            attachment_link.replace_with(img)
+
+        attachment_preview_links = [
+            anchor for anchor in soup.find_all('a') if 'preview=' in anchor.get('href', '')
+        ]
+
+        for attachment_preview_link in attachment_preview_links:
+            query = unquote(urlparse(attachment_preview_link['href']).query)
+            attachment_name = query.rpartition('/')[-1].replace('+', ' ')
+
+            src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+            img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
+
+            attachment_preview_link.replace_with(img)
+
+        attachment_imgs = [
+            img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
+        ]
+
+        for img in attachment_imgs:
+            attachment_name = unquote(urlparse(img['src']).path.rpartition('/')[-1])
+            img['alt'] = attachment_name
+            img['src'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
+
+        return soup
+
+    def __convert_jira_issues(self, soup):
+        jira_issue_spans = [span for span in soup.select('span.jira-issue')]
+
+        for span in jira_issue_spans:
+            img = soup.new_tag('img', attrs={'src': span['data-jira-key'], 'alt': 'jira_issue'})
+            span.replace_with(img)
+
+        return soup
+
+    def __convert_page_links(self, soup):
+        page_links = [anchor for anchor in soup.find_all('a') if 'pages/viewpage.action?' in anchor.get('href', '')]
+
+        for page_link in page_links:
+            url = urlparse(page_link['href'])
+            page_id = parse_qs(url.query).get('pageId', [])[0]
+
+            if page_id is None:
                 continue
 
-            # construct new, actually valid HTML tag
-            srcurl = os.path.join(ATTACHMENT_FOLDER_NAME, url)
-            imgtag = soup.new_tag("img", attrs={"src": srcurl, "alt": srcurl})
+            try:
+                page = self.__confluence.get_page_by_id(page_id, expand="ancestors")
+            except ApiError:
+                page_link['href'] = ''
+                continue
 
-            # insert a linebreak after the original "ac:image" tag, then replace with an actual img tag
-            image.insert_after(soup.new_tag("br"))
-            image.replace_with(imgtag)
+            parent_slug = ''
+            for parent in page['ancestors']:
+                parent_slug += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
+
+            page_link['href'] = f"{self.gitlab_wikis_path}{parent_slug}/{page['title'].replace(' ', '-')}"
+            del page_link['title']
+
         return soup
 
     def convert(self):
@@ -151,18 +267,14 @@ class Converter:
             if not path.endswith(".html"):
                 continue
 
-            if not path.endswith("test.html"):
-                print("SKIPPING", path)
-                continue
-
             print("Converting {}".format(path))
             with open(path) as f:
                 data = f.read()
 
             soup_raw = bs4.BeautifulSoup(data, 'html.parser')
-            soup = self.__convert_atlassian_html(soup_raw)
+            soup = self.__convert_html(soup_raw)
 
-            md = MarkdownConverter().convert_soup(soup)
+            md = SkipTableMarkdownConverter().convert_soup(soup)
             newname = os.path.splitext(path)[0]
             with open(newname + ".md", "w") as f:
                 f.write(md)
@@ -170,6 +282,7 @@ class Converter:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("gitlab_wikis_path", type=str, help="The path to the Gitlab wikis")
     parser.add_argument("url", type=str, help="The url to the confluence instance")
     parser.add_argument("username", type=str, help="The username")
     parser.add_argument("token", type=str, help="The access token to Confluence")
@@ -185,5 +298,6 @@ if __name__ == "__main__":
                           no_attach=args.no_attach)
         dumper.dump()
     
-    converter = Converter(out_dir=args.out_dir)
+    converter = Converter(out_dir=args.out_dir, gitlab_wikis_path=args.gitlab_wikis_path, url=args.url,
+                          username=args.username, token=args.token)
     converter.convert()
