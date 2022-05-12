@@ -80,10 +80,7 @@ class Exporter:
             # this could theoretically happen if Page IDs are not unique or there is a circle
             raise ExportException("Duplicate Page ID Found!")
 
-        # confluence = self.__confluence
-        # breakpoint()
         page = self.__confluence.get_page_by_id(src_id, expand="body.export_view")
-        # breakpoint()
         page_title = page["title"]
         page_id = page["id"]
     
