@@ -1,4 +1,5 @@
 import os
+import json
 import argparse
 
 from urllib.parse import urlparse, parse_qs, unquote
@@ -6,7 +7,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 import requests
 import bs4
 from markdownify import MarkdownConverter
-from atlassian import Confluence
+from atlassian import Confluence, utils
 from atlassian.errors import ApiError
 
 
@@ -22,6 +23,13 @@ NONCONVERTIBLE_TAGS = [
 
 class ExportException(Exception):
     pass
+
+
+def parse_cookies():
+    with open('cookies.json') as json_file:
+        data = json.load(json_file)
+
+    return data
 
 
 class SkipTableMarkdownConverter(MarkdownConverter):
@@ -42,14 +50,20 @@ class SkipTableMarkdownConverter(MarkdownConverter):
 
 
 class Exporter:
-    def __init__(self, url, username, token, out_dir, no_attach):
+    def __init__(self, url, space_key, out_dir, no_attach):
         self.__out_dir = out_dir
         self.__url = url
-        self.__username = username
-        self.__token = token
-        self.__confluence = Confluence(url=self.__url, username=self.__username, password=self.__token)
+        self.__space_key = space_key
+        self.__cookies = parse_cookies()
+        self.__confluence = Confluence(url=self.__url, cookies=self.__cookies)
         self.__seen = set()
         self.__no_attach = no_attach
+
+    def __parse_cookie_file(self, filepath):
+        with open(filepath) as json_file:
+            data = json.load(json_file)
+
+        return data
 
     def __sanitize_filename(self, document_name_raw):
         document_name = document_name_raw
@@ -112,38 +126,39 @@ class Exporter:
 
                 print("Saving attachment {} to {}".format(att_title, page_location))
 
-                r = requests.get(att_url, auth=(self.__username, self.__token), stream=True)
+                r = requests.get(att_url, stream=True, cookies=self.__cookies)
                 r.raise_for_status()
                 with open(att_filename, "wb") as f:
-                    for buf in r.iter_content():
-                        f.write(buf)
+                    f.write(r.content)
 
         self.__seen.add(page_id)
     
         # recurse to process child nodes
         for child_id in child_ids:
-            self.__dump_page(child_id, parents=parents + [page_title])
+            try:
+                self.__dump_page(child_id, parents=parents + [page_title])
+            except:
+                print(f"Failed to dump child - {child_id}")
+                continue
     
     def dump(self):
-        ret = self.__confluence.get_all_spaces(start=0, limit=500, expand='description.plain,homepage')
-        for space in ret["results"]:
-            space_key = space["key"]
-            print("Processing space", space_key)
-            if space.get("homepage") is None:
-                print("Skipping space: {}, no homepage found!".format(space_key))
-                print("In order for this tool to work there has to be a root page!")
-                raise ExportException("No homepage found")
-            else:
-                # homepage found, recurse from there
-                homepage_id = space["homepage"]["id"]
-                self.__dump_page(homepage_id, parents=[space_key])
+        space = self.__confluence.get_space(self.__space_key, expand='description.plain,homepage')
+        print("Processing space", self.__space_key)
+        if space.get("homepage") is None:
+            print("Skipping space: {}, no homepage found!".format(space_key))
+            print("In order for this tool to work there has to be a root page!")
+            raise ExportException("No homepage found")
+        else:
+            # homepage found, recurse from there
+            homepage_id = space["homepage"]["id"]
+            self.__dump_page(homepage_id, parents=[self.__space_key])
 
 
 class Converter:
-    def __init__(self, out_dir, gitlab_wikis_path, url, username, token):
+    def __init__(self, out_dir, gitlab_wikis_path, url):
         self.__out_dir = out_dir
         self.gitlab_wikis_path = gitlab_wikis_path
-        self.__confluence = Confluence(url=url, username=username, password=token)
+        self.__confluence = Confluence(url=url, cookies=parse_cookies())
 
     def recurse_findfiles(self, path):
         for entry in os.scandir(path):
@@ -196,6 +211,9 @@ class Converter:
         for attachment_link in attachment_links:
             attachment_name = attachment_link.get('data-linked-resource-default-alias') or \
                               attachment_link.get('data-filename')
+
+            if not attachment_name:
+                continue
 
             src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
             img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
@@ -284,8 +302,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("gitlab_wikis_path", type=str, help="The path to the Gitlab wikis")
     parser.add_argument("url", type=str, help="The url to the confluence instance")
-    parser.add_argument("username", type=str, help="The username")
-    parser.add_argument("token", type=str, help="The access token to Confluence")
+    parser.add_argument("space_key", type=str, help="Space key to import")
     parser.add_argument("out_dir", type=str, help="The directory to output the files to")
     parser.add_argument("--skip-attachments", action="store_true", dest="no_attach", required=False,
                         default=False, help="Skip fetching attachments")
@@ -294,10 +311,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if not args.no_fetch:
-        dumper = Exporter(url=args.url, username=args.username, token=args.token, out_dir=args.out_dir,
-                          no_attach=args.no_attach)
+        dumper = Exporter(url=args.url, space_key=args.space_key, out_dir=args.out_dir, no_attach=args.no_attach)
         dumper.dump()
     
-    converter = Converter(out_dir=args.out_dir, gitlab_wikis_path=args.gitlab_wikis_path, url=args.url,
-                          username=args.username, token=args.token)
+    converter = Converter(out_dir=args.out_dir, gitlab_wikis_path=args.gitlab_wikis_path, url=args.url)
     converter.convert()
