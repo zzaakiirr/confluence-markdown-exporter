@@ -18,6 +18,8 @@ NONCONVERTIBLE_TAGS = [
     'a.download-all-link',
     'div.plugin_attachments_upload_container',
     'style',
+    'img.waiting-image',
+    'img.confluence-external-resource',
 ]
 
 
