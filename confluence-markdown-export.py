@@ -19,6 +19,7 @@ NONCONVERTIBLE_TAGS = [
     'div.plugin_attachments_upload_container',
     'style',
     'img.waiting-image',
+    'img.emoticon',
     'img.confluence-external-resource',
 ]
 
@@ -244,7 +245,7 @@ class Converter:
             attachment_preview_link.replace_with(img)
 
         attachment_imgs = [
-            img for img in soup.select('img:not(.emoticon)') if 'download/attachments/' in img.get('src', '')
+            img for img in soup.select('img') if 'download/attachments/' in img.get('src', '')
         ]
 
         for img in attachment_imgs:
