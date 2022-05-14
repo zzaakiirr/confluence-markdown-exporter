@@ -64,7 +64,7 @@ class SkipTableMarkdownConverter(MarkdownConverter):
             converted_img = self.convert_img(img, '', convert_as_inline)
             text = text.replace(str(img), converted_img)
 
-        return text
+        return f'\n\n{text}\n\n'
 
 
 class Exporter:
