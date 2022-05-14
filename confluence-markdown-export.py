@@ -32,6 +32,21 @@ def parse_cookies():
     return data
 
 
+def sanitize_filename(document_name_raw):
+    document_name = document_name_raw
+
+    for invalid in ["\\", "/"]:
+        if invalid in document_name:
+            print("Dangerous page title: \"{}\", \"{}\" found, replacing it with \"_\"".format(
+                document_name,
+                invalid))
+            document_name = document_name.replace(invalid, "_")
+
+    document_name = ' '.join(document_name.split()) # replace multiple whitespaces with single one
+
+    return document_name
+
+
 class SkipTableMarkdownConverter(MarkdownConverter):
     def process_tag(self, node, convert_as_inline, children_only=False):
         if node.name != 'table':
@@ -65,16 +80,6 @@ class Exporter:
 
         return data
 
-    def __sanitize_filename(self, document_name_raw):
-        document_name = document_name_raw
-        for invalid in ["..", "/"]:
-            if invalid in document_name:
-                print("Dangerous page title: \"{}\", \"{}\" found, replacing it with \"_\"".format(
-                    document_name,
-                    invalid))
-                document_name = document_name.replace(invalid, "_")
-        return document_name
-
     def __dump_page(self, src_id, parents):
         if src_id in self.__seen:
             # this could theoretically happen if Page IDs are not unique or there is a circle
@@ -97,7 +102,7 @@ class Exporter:
             document_name = page_title + extension
 
         # make some rudimentary checks, to prevent trivial errors
-        sanitized_filename = self.__sanitize_filename(document_name)
+        sanitized_filename = sanitize_filename(document_name)
 
         page_location = parents + [sanitized_filename]
         page_filename = os.path.join(self.__out_dir, *page_location)
@@ -118,7 +123,7 @@ class Exporter:
 
                 # att_url = self.__url + "wiki/" + download
                 att_url = self.__url + download
-                att_sanitized_name = self.__sanitize_filename(att_title)
+                att_sanitized_name = sanitize_filename(att_title)
                 att_filename = os.path.join(page_output_dir, ATTACHMENT_FOLDER_NAME, att_sanitized_name)
 
                 att_dirname = os.path.dirname(att_filename)
@@ -215,6 +220,7 @@ class Converter:
             if not attachment_name:
                 continue
 
+            attachment_name = sanitize_filename(attachment_name)
             src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
             img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
 
@@ -226,7 +232,9 @@ class Converter:
 
         for attachment_preview_link in attachment_preview_links:
             query = unquote(urlparse(attachment_preview_link['href']).query)
+
             attachment_name = query.rpartition('/')[-1].replace('+', ' ')
+            attachment_name = sanitize_filename(attachment_name)
 
             src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
             img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
@@ -239,6 +247,8 @@ class Converter:
 
         for img in attachment_imgs:
             attachment_name = unquote(urlparse(img['src']).path.rpartition('/')[-1])
+            attachment_name = sanitize_filename(attachment_name)
+
             img['alt'] = attachment_name
             img['src'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
 
