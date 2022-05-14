@@ -18,6 +18,9 @@ NONCONVERTIBLE_TAGS = [
     'a.download-all-link',
     'div.plugin_attachments_upload_container',
     'style',
+    'img.waiting-image',
+    'img.emoticon',
+    'img.confluence-external-resource',
 ]
 
 
@@ -30,6 +33,21 @@ def parse_cookies():
         data = json.load(json_file)
 
     return data
+
+
+def sanitize_filename(document_name_raw):
+    document_name = document_name_raw
+
+    for invalid in ["\\", "/"]:
+        if invalid in document_name:
+            print("Dangerous page title: \"{}\", \"{}\" found, replacing it with \"_\"".format(
+                document_name,
+                invalid))
+            document_name = document_name.replace(invalid, "_")
+
+    document_name = ' '.join(document_name.split()) # replace multiple whitespaces with single one
+
+    return document_name
 
 
 class SkipTableMarkdownConverter(MarkdownConverter):
@@ -46,7 +64,7 @@ class SkipTableMarkdownConverter(MarkdownConverter):
             converted_img = self.convert_img(img, '', convert_as_inline)
             text = text.replace(str(img), converted_img)
 
-        return text
+        return f'\n\n{text}\n\n'
 
 
 class Exporter:
@@ -64,16 +82,6 @@ class Exporter:
             data = json.load(json_file)
 
         return data
-
-    def __sanitize_filename(self, document_name_raw):
-        document_name = document_name_raw
-        for invalid in ["..", "/"]:
-            if invalid in document_name:
-                print("Dangerous page title: \"{}\", \"{}\" found, replacing it with \"_\"".format(
-                    document_name,
-                    invalid))
-                document_name = document_name.replace(invalid, "_")
-        return document_name
 
     def __dump_page(self, src_id, parents):
         if src_id in self.__seen:
@@ -97,7 +105,7 @@ class Exporter:
             document_name = page_title + extension
 
         # make some rudimentary checks, to prevent trivial errors
-        sanitized_filename = self.__sanitize_filename(document_name)
+        sanitized_filename = sanitize_filename(document_name)
 
         page_location = parents + [sanitized_filename]
         page_filename = os.path.join(self.__out_dir, *page_location)
@@ -118,7 +126,7 @@ class Exporter:
 
                 # att_url = self.__url + "wiki/" + download
                 att_url = self.__url + download
-                att_sanitized_name = self.__sanitize_filename(att_title)
+                att_sanitized_name = sanitize_filename(att_title)
                 att_filename = os.path.join(page_output_dir, ATTACHMENT_FOLDER_NAME, att_sanitized_name)
 
                 att_dirname = os.path.dirname(att_filename)
@@ -205,7 +213,7 @@ class Converter:
 
     def __convert_attachments(self, soup):
         attachment_links = [
-            anchor for anchor in soup.find_all('a') if 'download/attachments/' in anchor.get('href', '')
+            anchor for anchor in soup.select('a:not(.external-link)') if 'download/attachments/' in anchor.get('href', '')
         ]
 
         for attachment_link in attachment_links:
@@ -215,18 +223,21 @@ class Converter:
             if not attachment_name:
                 continue
 
+            attachment_name = sanitize_filename(attachment_name)
             src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
             img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
 
             attachment_link.replace_with(img)
 
         attachment_preview_links = [
-            anchor for anchor in soup.find_all('a') if 'preview=' in anchor.get('href', '')
+            anchor for anchor in soup.select('a:not(.external-link)') if 'preview=' in anchor.get('href', '')
         ]
 
         for attachment_preview_link in attachment_preview_links:
             query = unquote(urlparse(attachment_preview_link['href']).query)
+
             attachment_name = query.rpartition('/')[-1].replace('+', ' ')
+            attachment_name = sanitize_filename(attachment_name)
 
             src = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
             img = soup.new_tag('img', attrs={'src': src, 'alt': attachment_name})
@@ -234,11 +245,13 @@ class Converter:
             attachment_preview_link.replace_with(img)
 
         attachment_imgs = [
-            img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
+            img for img in soup.select('img') if 'download/attachments/' in img.get('src', '')
         ]
 
         for img in attachment_imgs:
             attachment_name = unquote(urlparse(img['src']).path.rpartition('/')[-1])
+            attachment_name = sanitize_filename(attachment_name)
+
             img['alt'] = attachment_name
             img['src'] = os.path.join(ATTACHMENT_FOLDER_NAME, attachment_name)
 
