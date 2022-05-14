@@ -210,7 +210,7 @@ class Converter:
 
     def __convert_attachments(self, soup):
         attachment_links = [
-            anchor for anchor in soup.find_all('a') if 'download/attachments/' in anchor.get('href', '')
+            anchor for anchor in soup.select('a:not(.external-link)') if 'download/attachments/' in anchor.get('href', '')
         ]
 
         for attachment_link in attachment_links:
@@ -242,7 +242,7 @@ class Converter:
             attachment_preview_link.replace_with(img)
 
         attachment_imgs = [
-            img for img in soup.find_all('img') if 'download/attachments/' in img.get('src', '')
+            img for img in soup.select('img:not(.emoticon)') if 'download/attachments/' in img.get('src', '')
         ]
 
         for img in attachment_imgs:
