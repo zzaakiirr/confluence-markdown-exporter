@@ -230,7 +230,7 @@ class Converter:
             attachment_link.replace_with(img)
 
         attachment_preview_links = [
-            anchor for anchor in soup.find_all('a') if 'preview=' in anchor.get('href', '')
+            anchor for anchor in soup.select('a:not(.external-link)') if 'preview=' in anchor.get('href', '')
         ]
 
         for attachment_preview_link in attachment_preview_links:
