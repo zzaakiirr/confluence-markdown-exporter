@@ -271,7 +271,7 @@ class Converter:
 
         for page_link in page_links:
             url = urlparse(page_link['href'])
-            page_id = parse_qs(url.query).get('pageId', [])[0]
+            page_id = parse_qs(url.query).get('pageId', [None])[0]
 
             if page_id is None:
                 continue
