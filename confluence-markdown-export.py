@@ -144,7 +144,7 @@ class Exporter:
         # recurse to process child nodes
         for child_id in child_ids:
             try:
-                self.__dump_page(child_id, parents=parents + [page_title])
+                self.__dump_page(child_id, parents=parents + [sanitize_filename(page_title)])
             except:
                 print(f"Failed to dump child - {child_id}")
                 continue
