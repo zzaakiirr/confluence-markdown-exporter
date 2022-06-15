@@ -26,7 +26,7 @@ NONCONVERTIBLE_TAGS = [
     'img.confluence-external-resource',
 ]
 
-DRAW_IO_DIAGRAM_URI_REGEX = "/rest/drawio/1.0/diagram/crud/.*'"
+DRAW_IO_DIAGRAM_URI_REGEX = "(/rest/drawio/1.0/diagram/crud/.*?)'"
 
 
 class ExportException(Exception):
@@ -123,7 +123,7 @@ class Exporter:
 
         i = 0
         for drawio_img in soup.find_all('img', {'class': 'drawio-diagram-image'}):
-            drawio = self.__confluence.get(diagram_urls[0][:-1]) # Last symbol is `'`. TODO: Fix regex
+            drawio = self.__confluence.get(diagram_urls[i])
             if not drawio:
                 continue
 

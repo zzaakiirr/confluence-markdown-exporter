@@ -39,7 +39,6 @@ class DrawioConverter:
 
         return True
 
-    # TODO: Use tempfiles?
     @classmethod
     def __remove_created_files(cls):
         filepaths_to_delete = [filepath for filepath in [XML_FILEPATH, PNG_FILEPATH] if os.path.exists(filepath)]
