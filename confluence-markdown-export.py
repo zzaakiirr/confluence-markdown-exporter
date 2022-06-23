@@ -1,7 +1,7 @@
 import os
 import json
 import argparse
-
+import urllib.parse
 from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
@@ -284,9 +284,9 @@ class Converter:
 
             parent_slug = ''
             for parent in page['ancestors']:
-                parent_slug += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
+                parent_slug += f"/{urllib.parse.quote(sanitize_filename(parent['title']))}" if parent.get('title') else ''
 
-            page_link['href'] = f"{self.gitlab_wikis_path}{parent_slug}/{page['title'].replace(' ', '-')}"
+            page_link['href'] = f"{self.gitlab_wikis_path}{parent_slug}/{urllib.parse.quote(sanitize_filename(page['title']))}"
             del page_link['title']
 
         return soup
