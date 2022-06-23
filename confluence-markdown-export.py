@@ -153,7 +153,7 @@ class Exporter:
         space = self.__confluence.get_space(self.__space_key, expand='description.plain,homepage')
         print("Processing space", self.__space_key)
         if space.get("homepage") is None:
-            print("Skipping space: {}, no homepage found!".format(space_key))
+            print("Skipping space: {}, no homepage found!".format(self.__space_key))
             print("In order for this tool to work there has to be a root page!")
             raise ExportException("No homepage found")
         else:
