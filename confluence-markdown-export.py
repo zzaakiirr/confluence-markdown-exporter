@@ -1,14 +1,17 @@
 import os
-import json
+import re
 import argparse
 
 from urllib.parse import urlparse, parse_qs, unquote
 
 import requests
 import bs4
-from markdownify import MarkdownConverter
 from atlassian import Confluence, utils
 from atlassian.errors import ApiError
+
+from helpers import parse_cookies, sanitize_filename
+from markdown import SkipTableMarkdownConverter
+from drawio import DrawioConverter
 
 
 ATTACHMENT_FOLDER_NAME = "attachments"
@@ -23,48 +26,11 @@ NONCONVERTIBLE_TAGS = [
     'img.confluence-external-resource',
 ]
 
+DRAW_IO_DIAGRAM_URI_REGEX = "(/rest/drawio/1.0/diagram/crud/.*?)'"
+
 
 class ExportException(Exception):
     pass
-
-
-def parse_cookies():
-    with open('cookies.json') as json_file:
-        data = json.load(json_file)
-
-    return data
-
-
-def sanitize_filename(document_name_raw):
-    document_name = document_name_raw
-
-    for invalid in ["\\", "/"]:
-        if invalid in document_name:
-            print("Dangerous page title: \"{}\", \"{}\" found, replacing it with \"_\"".format(
-                document_name,
-                invalid))
-            document_name = document_name.replace(invalid, "_")
-
-    document_name = ' '.join(document_name.split()) # replace multiple whitespaces with single one
-
-    return document_name
-
-
-class SkipTableMarkdownConverter(MarkdownConverter):
-    def process_tag(self, node, convert_as_inline, children_only=False):
-        if node.name != 'table':
-            return super(SkipTableMarkdownConverter, self).process_tag(node, convert_as_inline, children_only)
-
-        for el in node.find_all():
-            del el['class']
-
-        text = str(node.prettify())
-
-        for img in node.find_all('img'):
-            converted_img = self.convert_img(img, '', convert_as_inline)
-            text = text.replace(str(img), converted_img)
-
-        return f'\n\n{text}\n\n'
 
 
 class Exporter:
@@ -76,12 +42,6 @@ class Exporter:
         self.__confluence = Confluence(url=self.__url, cookies=self.__cookies)
         self.__seen = set()
         self.__no_attach = no_attach
-
-    def __parse_cookie_file(self, filepath):
-        with open(filepath) as json_file:
-            data = json.load(json_file)
-
-        return data
 
     def __dump_page(self, src_id, parents):
         if src_id in self.__seen:
@@ -113,6 +73,11 @@ class Exporter:
         page_output_dir = os.path.dirname(page_filename)
         os.makedirs(page_output_dir, exist_ok=True)
         print("Saving to {}".format(" / ".join(page_location)))
+
+        if 'drawio-diagram-image' in content:
+            print('Converting draw.io images')
+            content = self.__content_with_embedded_drawio_images(content, page_id)
+
         with open(page_filename, "w") as f:
             f.write(content)
 
@@ -149,6 +114,27 @@ class Exporter:
                 print(f"Failed to dump child - {child_id}")
                 continue
     
+    def __content_with_embedded_drawio_images(self, content, page_id):
+        plain_page = self.__confluence.get_page_by_id(page_id, expand="body.view")
+        plain_content = plain_page['body']['view']['value']
+        diagram_urls = re.findall(DRAW_IO_DIAGRAM_URI_REGEX, plain_content)
+
+        soup = bs4.BeautifulSoup(content, 'html.parser')
+
+        i = 0
+        for drawio_img in soup.find_all('img', {'class': 'drawio-diagram-image'}):
+            drawio = self.__confluence.get(diagram_urls[i])
+            if not drawio:
+                continue
+
+            embedded_diagram_data = DrawioConverter.convert_xml_to_base64_png(drawio['xml'])
+            if embedded_diagram_data:
+                drawio_img['src'] = f'data:image/png;base64,{embedded_diagram_data}'
+
+            i += 1
+
+        return str(soup)
+
     def dump(self):
         space = self.__confluence.get_space(self.__space_key, expand='description.plain,homepage')
         print("Processing space", self.__space_key)
@@ -165,7 +151,7 @@ class Exporter:
 class Converter:
     def __init__(self, out_dir, gitlab_wikis_path, url):
         self.__out_dir = out_dir
-        self.gitlab_wikis_path = gitlab_wikis_path
+        self.__gitlab_wikis_path = gitlab_wikis_path
         self.__confluence = Confluence(url=url, cookies=parse_cookies())
 
     def recurse_findfiles(self, path):
@@ -286,7 +272,7 @@ class Converter:
             for parent in page['ancestors']:
                 parent_slug += f"/{parent['title'].replace(' ', '-')}" if parent.get('title') else ''
 
-            page_link['href'] = f"{self.gitlab_wikis_path}{parent_slug}/{page['title'].replace(' ', '-')}"
+            page_link['href'] = f"{self.__gitlab_wikis_path}{parent_slug}/{page['title'].replace(' ', '-')}"
             del page_link['title']
 
         return soup
